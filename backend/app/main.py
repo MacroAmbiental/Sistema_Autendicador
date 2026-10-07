@@ -19,17 +19,68 @@ app = FastAPI(
     debug=settings.debug,
 )
 
+
+# ============================================================
+# CORS
+# ============================================================
+
+allowed_origins = [
+    # Desenvolvimento local
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+
+    # Produção
+    "https://sistema-de-equipamentos.onrender.com",
+]
+
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
+
+# ============================================================
+# Arquivos estáticos
+# ============================================================
+
+static_dir = Path(__file__).resolve().parent / "static"
+
+app.mount(
+    "/static",
+    StaticFiles(directory=static_dir),
+    name="static",
+)
+
+
+# ============================================================
+# API
+# ============================================================
+
 app.include_router(api_router)
 
+
+
+# ============================================================
+# Health Check
+# ============================================================
+
+@app.get("/api/v1/health", tags=["Health"])
+async def health_check():
+    return {
+        "status": "ok",
+        "application": settings.app_name,
+        "version": "0.1.0",
+    }
+
+
+# ============================================================
+# Root
+# ============================================================
 
 @app.get("/", tags=["Root"])
 async def root():
@@ -40,6 +91,13 @@ async def root():
     }
 
 
+
+# ============================================================
+# Frontend
+# ============================================================
+
 @app.get("/frontend", include_in_schema=False)
 async def frontend_page():
-    return FileResponse(Path(__file__).resolve().parent / "static" / "index.html")
+    return FileResponse(
+        static_dir / "index.html"
+    )

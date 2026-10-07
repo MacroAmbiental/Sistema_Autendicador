@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 
-const DEFAULT_API = 'http://127.0.0.1:8000'
+// const DEFAULT_API = 'http://127.0.0.1:8000'
+
+const DEFAULT_API = 'https://sistema-autendicador-backend.onrender.com'
+
 
 const defaultConnection = {
   apiUrl: DEFAULT_API,
