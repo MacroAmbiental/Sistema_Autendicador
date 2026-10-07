@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment
+.env
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Credentials
+credentials/
+service-account*.json
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
