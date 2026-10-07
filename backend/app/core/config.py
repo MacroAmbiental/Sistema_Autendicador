@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     cors_origins: str = (
         "http://localhost:5173,"
         "http://127.0.0.1:5173,"
-        "https://sistema-de-equipamentos.onrender.com"
+        "https://sistema-de-equipamentos.onrender.com",
+        "https://sistema-autendicador.onrender.com"
     )
 
     # Firebase

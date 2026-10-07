@@ -31,6 +31,7 @@ allowed_origins = [
 
     # Produção
     "https://sistema-de-equipamentos.onrender.com",
+    "https://sistema-autendicador.onrender.com",
 ]
 
 
