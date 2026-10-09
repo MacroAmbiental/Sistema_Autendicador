@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = False
     database_url: str = ""
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:5500,http://127.0.0.1:5500,http://localhost:5173,http://127.0.0.1:5173"
     firebase_project_id: str = ""
     firebase_storage_bucket: str = ""
     # firebase em producao; local SOMENTE quando explicitamente ativado em dev/teste.
@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     integration_api_key: str = ""
     admin_api_key: str = ""
     verification_base_url: str = "http://localhost:5173"
+    ti_allowed_emails: str = ""
     max_pdf_bytes: int = 12_000_000
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore")
 

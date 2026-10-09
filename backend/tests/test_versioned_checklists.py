@@ -89,3 +89,29 @@ def test_reject_changed_reuse_and_invalid_pdf():
     assert register('{"x":2}', "evento-1").status_code == 400
     assert register('{"x":1}', "evento-2", b"NOT PDF").status_code == 400
     assert client.get("/api/v1/admin/checklists").status_code == 401
+
+
+def test_qrcode_of_each_pdf_opens_its_exact_version():
+    # Teste de leitura real do QR: opcional em maquinas sem OpenCV instalado.
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    document_id = "EQUIP_ESTOQUE_5_MODELO_9_SEMANA_20261005"
+    versions = []
+    for idx in range(2):
+        reply = register('{"resposta": %d}' % idx, "alteracao-%d" % idx, pdf_original(), document_id=document_id)
+        assert reply.status_code == 201, reply.text
+        record = reply.json()
+        data = client.get(record["pdf_path"])
+        assert data.status_code == 200
+        pdf = fitz.open(stream=data.content, filetype="pdf")
+        pixel = pdf[0].get_pixmap(matrix=fitz.Matrix(4, 4))
+        image = np.frombuffer(pixel.samples, dtype=np.uint8).reshape(pixel.height, pixel.width, pixel.n)
+        bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        qr_link, _, _ = cv2.QRCodeDetector().detectAndDecode(bgr)
+        pdf.close()
+        assert qr_link == record["verification_url"]
+        assert qr_link.endswith("/" + record["version_id"])
+        versions.append(record)
+    assert versions[0]["verification_url"] != versions[1]["verification_url"]
+    old = client.get("/api/v1/verify/" + document_id + "/" + versions[0]["version_id"]).json()
+    assert old["valid"] is True and old["is_latest"] is False

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { logoutToLogin } from './firebaseAuth'
 
 const BASE = (import.meta.env.VITE_AUTHENTICATOR_API_BASE_URL || 'http://localhost:8000').replace(/\/+$/, '')
 
@@ -17,12 +18,14 @@ export default function VerificationPage() {
     }
     const documentId = encodeURIComponent(docId)
     const version = encodeURIComponent(versionId)
-    Promise.all([
-      fetch(`${BASE}/api/v1/verify/${documentId}/${version}`),
-      fetch(`${BASE}/api/v1/checklists/${documentId}/versions`),
-    ]).then(async ([resp, list]) => {
+    fetch(`${BASE}/api/v1/verify/${documentId}/${version}`).then(async (resp) => {
       if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).detail || 'Documento nao encontrado')
-      setData(await resp.json())
+      const payload = await resp.json()
+
+      // NUNCA redirecionar o QR de uma versao a pagina generica: isso perderia
+      // a identidade do PDF que foi escaneado.
+      setData(payload)
+      const list = await fetch(`${BASE}/api/v1/checklists/${documentId}/versions`)
       if (list.ok) setVersions((await list.json()).versions || [])
     }).catch(err => setError(err.message || 'Falha na consulta'))
   }, [prefix, docId, versionId])
@@ -48,14 +51,17 @@ export default function VerificationPage() {
     <main className="max-w-5xl mx-auto p-5 md:p-12 text-slate-100">
       <header className="flex items-center justify-between gap-5 mb-10">
         <div><p className="text-sm text-teal-300 uppercase tracking-widest">Macroambiental</p><h1 className="text-3xl font-semibold mt-1">Verificacao de documentos</h1></div>
-        <span className="rounded-full border border-slate-600 px-4 py-2 text-sm">Portal SERTRAS</span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-slate-600 px-4 py-2 text-sm">Portal SERTRAS</span>
+          <button type="button" onClick={logoutToLogin} className="rounded-full border border-rose-700 px-4 py-2 text-xs text-rose-200">Sair</button>
+        </div>
       </header>
       {error ? <p role="alert" className="rounded-xl bg-red-950 border border-red-700 p-5">{error}</p> : !data ?
         <p className="text-slate-300">Consultando autenticacao e auditoria...</p> : <>
           <section className="rounded-xl bg-slate-900 border border-slate-700 p-6 mb-6">
             <div className="flex gap-4 items-start justify-between">
               <div><h2 className="text-xl font-medium">{data.title}</h2><p className="text-sm text-slate-400 mt-2 break-all">Documento: {docId}</p></div>
-              <strong className={`rounded-lg px-4 py-2 text-sm ${data.valid ? 'bg-emerald-900 text-emerald-100' : 'bg-red-900 text-red-100'}`}>{data.valid ? 'INTEGRIDADE CONFIRMADA' : 'INTEGRIDADE COMPROMETIDA'}</strong>
+              <strong className={`rounded-lg px-4 py-2 text-sm ${data.valid ? 'bg-emerald-900 text-emerald-100' : 'bg-red-900 text-red-100'}`}>{data.valid ? (data.is_latest ? 'AUTENTICO - VERSAO ATUAL' : 'AUTENTICO - VERSAO ANTERIOR') : 'INTEGRIDADE COMPROMETIDA'}</strong>
             </div>
             <dl className="grid sm:grid-cols-2 gap-4 mt-6 text-sm">
               <div><dt className="text-slate-400">Versao verificada</dt><dd className="text-lg font-semibold">{data.number} de {data.latest_version}</dd></div>
@@ -64,7 +70,8 @@ export default function VerificationPage() {
               <div><dt className="text-slate-400">Registro UTC</dt><dd>{new Date(data.created_at).toLocaleString('pt-BR')}</dd></div>
             </dl>
             <p className="text-xs text-slate-400 mt-5 break-all">Hash SHA-256 do arquivo: {data.pdf_hash}</p>
-            <p className="text-xs text-slate-400 mt-2">A validade confirma a integridade do PDF e do snapshot arquivados. Um papel impresso deve ser comparado ao documento oficial.</p>
+            <p className="text-xs text-slate-400 mt-2">A autenticidade se refere a esta versao especifica. Alteracoes posteriores geram novas versoes, sem falsificar as antigas. Um papel impresso deve ser comparado ao PDF oficial.</p>
+            {data.valid && !data.is_latest && <p role="status" className="mt-3 text-amber-300 text-sm font-semibold">Existe uma versao mais recente deste checklist. Consulte o historico abaixo antes de utilizar esta impressao.</p>}
             {data.valid && <a href={`${BASE}${data.pdf_path}`} target="_blank" rel="noreferrer" className="inline-block mt-6 rounded-md bg-teal-500 text-slate-950 font-semibold px-5 py-3">Abrir PDF oficial com QR Code</a>}
           </section>
           <section className="rounded-xl bg-slate-900 border border-slate-700 p-6 mb-6">

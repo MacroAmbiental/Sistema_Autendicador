@@ -1,3 +1,8 @@
+> Revisao de 09/10/2026: o QR aponta a `/verificar/{document_id}/{version_id}`.
+> A pagina VerificationPage nao redireciona mais a pagina generica, pois isso
+> ocultava a identidade da versao. 12 testes locais passaram.
+> Consulte INTEGRACAO_QRCODE_VERSOES.md.
+
 # Autenticador Macroambiental — versoes de checklists
 
 ## Entrega implementada

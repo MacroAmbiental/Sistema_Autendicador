@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { logoutToLogin, subscribeAuth } from './firebaseAuth'
+import { hasTiPermission } from './permissions'
 
 // const DEFAULT_API = 'http://127.0.0.1:8000'
 
@@ -57,6 +59,9 @@ function App() {
   const [savedConnections, setSavedConnections] = useState([])
   const [selectedConnectionId, setSelectedConnectionId] = useState('')
   const [tableDraft, setTableDraft] = useState('')
+  const [authReady, setAuthReady] = useState(false)
+  const [idToken, setIdToken] = useState('')
+  const [viewerEmail, setViewerEmail] = useState('')
 
   const sanitizeTables = (tables) => {
     const normalized = Array.isArray(tables) ? tables : []
@@ -215,7 +220,10 @@ function App() {
           tables.map(async (tableName) => {
             const response = await fetch(`${baseUrl}/api/v1/sql/connect`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${idToken}`,
+              },
               body: JSON.stringify({
                 connection_string: connection.sqlUrl,
                 table_name: tableName,
@@ -278,6 +286,37 @@ function App() {
   }
 
   useEffect(() => {
+    const unsubscribe = subscribeAuth(async (state) => {
+      if (state.type === 'error') {
+        setError(state.error?.message || 'Falha ao iniciar autenticacao.')
+        setAuthReady(true)
+        return
+      }
+
+      if (state.type === 'signed-in') {
+        const token = await state.user.getIdToken()
+        const allowed = await hasTiPermission(state.user)
+
+        if (!allowed) {
+          window.location.replace('/validador')
+          return
+        }
+
+        setIdToken(token)
+        setViewerEmail(state.user.email || '')
+        setAuthReady(true)
+        return
+      }
+
+      window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`)
+    })
+
+    return () => unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!authReady) return
+
     const stored = localStorage.getItem(CONNECTIONS_STORAGE_KEY)
     if (stored) {
       try {
@@ -294,7 +333,7 @@ function App() {
 
     fetchHealth()
     fetchDocuments()
-  }, [])
+  }, [authReady])
 
   const saveCurrentConnection = ({ showMessage = true } = {}) => {
     const normalized = normalizeConnection(connection, connection.id || `conn-${Date.now()}`)
@@ -437,7 +476,10 @@ function App() {
 
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(connection.sourceType === 'sql' ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
         body: JSON.stringify(body),
       })
 
@@ -478,10 +520,23 @@ function App() {
       <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
         <div className="w-full">
           <div className="space-y-8">
+            {!authReady ? (
+              <div className="border border-[#e2e8e4] bg-white p-5 text-sm text-[#4a564f]">Validando permissao de acesso TI...</div>
+            ) : null}
             <div className="mb-8">
 
-              <div className="mb-2 text-[11px] uppercase tracking-[0.25em] text-[#708278] font-bold">
-                Acesso restrito
+              <div className="mb-2 flex items-center justify-between gap-3 flex-wrap">
+                <div className="text-[11px] uppercase tracking-[0.25em] text-[#708278] font-bold">Acesso restrito TI</div>
+                <div className="flex items-center gap-2">
+                  {viewerEmail ? <span className="border border-[#e2e8e4] bg-white px-2 py-1 text-[10px] text-[#4a564f]">{viewerEmail}</span> : null}
+                  <button
+                    type="button"
+                    onClick={logoutToLogin}
+                    className="border border-rose-300 bg-white px-3 py-1 text-xs font-semibold text-rose-700"
+                  >
+                    Sair
+                  </button>
+                </div>
               </div>
               <h2 className="font-black text-3xl sm:text-4xl tracking-tight text-[#0f1411]">
                 Autenticador
@@ -660,6 +715,7 @@ function App() {
                   <div className="grid gap-2 sm:grid-cols-3">
                     <button
                       type="submit"
+                      disabled={!authReady}
                       className="w-full bg-gradient-to-r from-[#2563eb] to-[#1d4ed8] px-4 py-3 text-sm font-bold uppercase tracking-[0.15em] text-white transition hover:from-[#1d4ed8] hover:to-[#1e40af]"
                     >
                       Conectar e ler tabelas

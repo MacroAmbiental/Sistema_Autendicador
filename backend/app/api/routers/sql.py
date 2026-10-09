@@ -5,11 +5,65 @@ from datetime import datetime, timezone
 from typing import Any
 
 import psycopg
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from psycopg import sql
+from app.core.config import settings
+from app.core.firebase import get_firebase_app
 
 router = APIRouter(prefix="/sql", tags=["SQL"])
+
+
+def _ti_email_set() -> set[str]:
+    return {
+        item.strip().lower()
+        for item in str(settings.ti_allowed_emails or "").split(",")
+        if item.strip()
+    }
+
+
+def _claims_as_set(value: Any) -> set[str]:
+    if isinstance(value, list):
+        return {str(item).strip().lower() for item in value if str(item).strip()}
+    if isinstance(value, str):
+        return {item.strip().lower() for item in value.split(",") if item.strip()}
+    return set()
+
+
+def _has_ti_permission(decoded_token: dict[str, Any]) -> bool:
+    email = str(decoded_token.get("email") or "").strip().lower()
+    if email and email in _ti_email_set():
+        return True
+
+    roles = set()
+    roles.add(str(decoded_token.get("role") or "").strip().lower())
+    roles.add(str(decoded_token.get("perfil") or "").strip().lower())
+    roles.update(_claims_as_set(decoded_token.get("roles")))
+    roles.update(_claims_as_set(decoded_token.get("perfis")))
+
+    return any(role in {"ti", "admin_ti", "admin-ti", "admin"} for role in roles)
+
+
+def secure_ti_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Login obrigatorio para acesso SQL")
+
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token de acesso ausente")
+
+    try:
+        get_firebase_app()
+        from firebase_admin import auth
+
+        decoded = auth.verify_id_token(token)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token Firebase invalido ou expirado") from exc
+
+    if not _has_ti_permission(decoded):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso permitido somente para usuarios TI")
+
+    return decoded
 
 
 class SqlConnectionRequest(BaseModel):
@@ -157,7 +211,7 @@ def read_sql_table(connection_string: str, table_name: str, limit: int = 100) ->
 
 
 @router.post("/connect")
-async def connect_sql_table(payload: SqlConnectionRequest):
+async def connect_sql_table(payload: SqlConnectionRequest, viewer: dict[str, Any] = Depends(secure_ti_user)):
     try:
         rows = read_sql_table(payload.connection_string, payload.table_name, payload.limit)
     except (ValueError, psycopg.Error) as exc:
@@ -175,7 +229,7 @@ async def connect_sql_table(payload: SqlConnectionRequest):
 
 
 @router.post("/documents")
-async def create_sql_document(payload: SqlDocumentCreateRequest):
+async def create_sql_document(payload: SqlDocumentCreateRequest, viewer: dict[str, Any] = Depends(secure_ti_user)):
     try:
         normalized_url = _validate_postgres_url(payload.connection_string)
         columns = _fetch_table_columns(normalized_url, payload.table_name)
@@ -247,7 +301,7 @@ async def create_sql_document(payload: SqlDocumentCreateRequest):
 
 
 @router.patch("/documents/{record_id}")
-async def update_sql_document(record_id: str, payload: SqlDocumentUpdateRequest):
+async def update_sql_document(record_id: str, payload: SqlDocumentUpdateRequest, viewer: dict[str, Any] = Depends(secure_ti_user)):
     try:
         normalized_url = _validate_postgres_url(payload.connection_string)
         table_name = payload.table_name.strip()
