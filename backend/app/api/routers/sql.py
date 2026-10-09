@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -43,6 +44,11 @@ def _hash_content(content: str) -> str:
     return hashlib.sha256(content.strip().encode("utf-8")).hexdigest()
 
 
+def _normalize_column_name(value: str) -> str:
+    # Normaliza para casar variacoes como "SHA-256", "sha_256" e "sha 256".
+    return re.sub(r"[^a-z0-9]", "", (value or "").strip().lower())
+
+
 def _normalize_hashes(raw_value: Any) -> list[str]:
     if raw_value is None:
         return []
@@ -68,7 +74,7 @@ def _validate_postgres_url(connection_string: str) -> str:
     return normalized_url
 
 
-def _fetch_table_columns(connection_string: str, table_name: str) -> set[str]:
+def _fetch_table_columns(connection_string: str, table_name: str) -> dict[str, str]:
     with psycopg.connect(_validate_postgres_url(connection_string), connect_timeout=10) as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -82,25 +88,30 @@ def _fetch_table_columns(connection_string: str, table_name: str) -> set[str]:
             )
             rows = cursor.fetchall()
 
-            values: set[str] = set()
+            values: dict[str, str] = {}
             for row in rows:
-                if isinstance(row, dict):
-                    for key in row.keys():
-                        if key is not None:
-                            values.add(str(key).lower())
-                elif row:
-                    value = row[0] if isinstance(row, (list, tuple)) else row
-                    if value is not None:
-                        values.add(str(value).lower())
+                if not row:
+                    continue
+                raw_name = row[0] if isinstance(row, (list, tuple)) else row
+                if raw_name is None:
+                    continue
+                original = str(raw_name)
+                normalized = _normalize_column_name(original)
+                if normalized and normalized not in values:
+                    values[normalized] = original
             return values
 
 
-def _build_record_dict(fields: dict[str, Any], columns: set[str]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in fields.items()
-        if key in columns and value is not None
-    }
+def _build_record_dict(fields: dict[str, Any], columns: dict[str, str]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, value in fields.items():
+        if value is None:
+            continue
+        normalized = _normalize_column_name(key)
+        column_name = columns.get(normalized)
+        if column_name and column_name not in payload:
+            payload[column_name] = value
+    return payload
 
 
 def _coerce_row_mapping(cursor: Any, row: Any) -> dict[str, Any]:
@@ -113,6 +124,14 @@ def _coerce_row_mapping(cursor: Any, row: Any) -> dict[str, Any]:
     if columns and isinstance(row, (list, tuple)):
         return dict(zip(columns, row, strict=False))
     return dict(row) if isinstance(row, dict) else {}
+
+
+def _resolve_hash_column_name(columns: dict[str, str]) -> str | None:
+    for alias in ("sha256", "sha_256", "sha-256", "sha 256"):
+        resolved = columns.get(_normalize_column_name(alias))
+        if resolved:
+            return resolved
+    return None
 
 
 def read_sql_table(connection_string: str, table_name: str, limit: int = 100) -> list[dict[str, Any]]:
@@ -163,8 +182,11 @@ async def create_sql_document(payload: SqlDocumentCreateRequest):
         content = (payload.content or "").strip()
         now = datetime.now(timezone.utc).isoformat()
         hashes = [_hash_content(content)] if content else []
+        latest_hash = hashes[-1] if hashes else None
         table_name = payload.table_name.strip()
         collection_name = (payload.collection_name or table_name).strip() or table_name
+
+        sha256_column = _resolve_hash_column_name(columns)
 
         record = {
             "title": payload.title.strip(),
@@ -178,6 +200,9 @@ async def create_sql_document(payload: SqlDocumentCreateRequest):
             "created_at": now,
             "updated_at": now,
         }
+
+        if sha256_column and latest_hash:
+            record[sha256_column] = latest_hash
 
         fields = _build_record_dict(record, columns)
         if not fields:
@@ -247,6 +272,8 @@ async def update_sql_document(record_id: str, payload: SqlDocumentUpdateRequest)
                 existing_hashes = _normalize_hashes(row_data.get("hashes"))
                 new_hash = _hash_content(updated_content)
                 final_hashes = [*existing_hashes, new_hash]
+                allowed_columns = _fetch_table_columns(normalized_url, table_name)
+                sha256_column = _resolve_hash_column_name(allowed_columns)
 
                 update_values = {
                     "title": updated_title,
@@ -260,7 +287,8 @@ async def update_sql_document(record_id: str, payload: SqlDocumentUpdateRequest)
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
 
-                allowed_columns = _fetch_table_columns(normalized_url, table_name)
+                if sha256_column:
+                    update_values[sha256_column] = new_hash
                 update_fields = _build_record_dict(update_values, allowed_columns)
                 if not update_fields:
                     raise ValueError("A tabela informada não contém colunas compatíveis para atualização de documentos.")

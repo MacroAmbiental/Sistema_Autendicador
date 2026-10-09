@@ -24,16 +24,7 @@ app = FastAPI(
 # CORS
 # ============================================================
 
-allowed_origins = [
-    # Desenvolvimento local
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-
-    # Produção
-    "https://sistema-de-equipamentos.onrender.com",
-    "https://sistema-autendicador.onrender.com",
-]
-
+allowed_origins = settings.cors_origins_list
 
 
 app.add_middleware(
